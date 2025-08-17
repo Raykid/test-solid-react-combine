@@ -91,20 +91,25 @@ function transformSouce(source) {
           ) {
             // 收集变量使用
             const identifierMap = {};
+            const whiteList = [];
             const useEffectBlock = node.arguments[0].body;
             traverse(useEffectBlock).forEach(function (child) {
               if (!!child && typeof child === "object") {
                 if (child.type === "Identifier") {
                   if (
-                    this.parent.node.type !== "VariableDeclarator" &&
-                    (this.parent.node.type !== "MemberExpression" ||
-                      child === this.parent.node.object)
+                    this.parent.node.type !== "MemberExpression" ||
+                    child === this.parent.node.object
                   ) {
-                    let children = identifierMap[child.name];
-                    if (!children) {
-                      identifierMap[child.name] = children = [];
+                    if (this.parent.node.type === "VariableDeclarator") {
+                      whiteList.push(child.name);
+                      delete identifierMap[child.name];
+                    } else if (!whiteList.includes(child.name)) {
+                      let children = identifierMap[child.name];
+                      if (!children) {
+                        identifierMap[child.name] = children = [];
+                      }
+                      children.push(child);
                     }
-                    children.push(child);
                   }
                 }
               }

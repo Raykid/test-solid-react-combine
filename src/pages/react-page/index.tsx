@@ -22,11 +22,13 @@ export const ReactPage: FC = () => {
 
   const [autoPlusCount, setAutoPlusCount] = useState(0);
   useEffect(() => {
-    const interval = setInterval(() => {
+    const id = setTimeout(() => {
       setAutoPlusCount((count) => count + 1);
     }, 5000);
-    return () => clearInterval(interval);
-  }, []);
+    return () => {
+      clearTimeout(id);
+    };
+  }, [autoPlusCount]);
 
   useEffect(() => {
     console.log("useEffect called: " + count);
