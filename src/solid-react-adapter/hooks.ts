@@ -1,4 +1,4 @@
-import { createRenderEffect } from "solid-js";
+import { createEffect, createRenderEffect } from "solid-js";
 import { createSignal, microDelay, solidPatchSignal } from "./patch";
 
 /**
@@ -142,7 +142,7 @@ export function useMemo<T>(factory: () => T, deps: DependencyList): T {
  */
 export function useEffect(effect: EffectCallback, deps?: DependencyList): void {
   let cleanup: Destructor | void;
-  createRenderEffect(() => {
+  createEffect(() => {
     if (deps) {
       trackDeps(deps);
     }
@@ -179,7 +179,7 @@ export function useLayoutEffect(
   deps?: DependencyList
 ): void {
   let cleanup: Destructor | void;
-  createRenderEffect(() => {
+  createEffect(() => {
     if (deps) {
       trackDeps(deps);
     }
@@ -207,7 +207,7 @@ export function useInsertionEffect(
   deps?: DependencyList
 ): void {
   let cleanup: Destructor | void;
-  createRenderEffect(() => {
+  createEffect(() => {
     if (deps) {
       trackDeps(deps);
     }
