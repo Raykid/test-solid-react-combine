@@ -5,7 +5,14 @@ import {
   SignalOptions,
 } from "solid-js";
 
-export const symbolSignal = Symbol("solid patch signal");
+export const microDelay = Promise.resolve();
+export const solidPatchSignal = Symbol("solid patch signal");
+Object.defineProperty(Symbol, "solidPatchSignal", {
+  configurable: true,
+  enumerable: false,
+  writable: false,
+  value: solidPatchSignal,
+});
 
 export function createSignal<T>(): Signal<T | undefined>;
 export function createSignal<T>(
@@ -23,18 +30,18 @@ export function createSignal<T>(value?: T, options?: SignalOptions<T>) {
     const value = signal();
     return dirty ? cache : value;
   };
-  Object.defineProperty(wrappedSignal, symbolSignal, {
+  Object.defineProperty(wrappedSignal, solidPatchSignal, {
     configurable: true,
     enumerable: false,
     writable: false,
-    value: symbolSignal,
+    value: solidPatchSignal,
   });
 
   return [
     wrappedSignal,
     ((value) => {
       if (!dirty) {
-        Promise.resolve().then(() => {
+        microDelay.then(() => {
           (setSignal as any)(cache);
           dirty = false;
         });

@@ -1,4 +1,12 @@
-import { FC, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FC,
+  useCallback,
+  useEffect,
+  useInsertionEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from "react";
 import "./index.less";
 
 export const ReactPage: FC = () => {
@@ -16,6 +24,20 @@ export const ReactPage: FC = () => {
     console.log("useEffect called: " + count);
     return () => {
       console.log("useEffect cleanup: " + count);
+    };
+  }, [count]);
+
+  useLayoutEffect(() => {
+    console.log("useLayoutEffect called: " + count);
+    return () => {
+      console.log("useLayoutEffect cleanup: " + count);
+    };
+  }, [count]);
+
+  useInsertionEffect(() => {
+    console.log("useInsertionEffect called: " + count);
+    return () => {
+      console.log("useInsertionEffect cleanup: " + count);
     };
   }, [count]);
 

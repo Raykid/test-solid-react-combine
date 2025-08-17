@@ -1,5 +1,5 @@
-import { createEffect, createMemo } from "solid-js";
-import { createSignal, symbolSignal } from "./patch";
+import { createRenderEffect } from "solid-js";
+import { createSignal, microDelay, solidPatchSignal } from "./patch";
 
 /**
  * The instruction passed to a {@link Dispatch} function in {@link useState}
@@ -62,6 +62,8 @@ export function useState<S>(state?: S | (() => S)) {
           case Symbol.toPrimitive:
           case "toJSON":
             return signal;
+          case solidPatchSignal:
+            return solidPatchSignal;
           default:
             return Reflect.get(value!, key);
         }
@@ -74,7 +76,7 @@ export function useState<S>(state?: S | (() => S)) {
 function trackDeps(deps: DependencyList) {
   deps.forEach((dep) => {
     // Track dependencies
-    if (typeof dep === "function" && symbolSignal in (dep as any)) {
+    if (typeof dep === "function" && solidPatchSignal in (dep as any)) {
       dep();
     }
   });
@@ -106,9 +108,15 @@ export function useCallback<T extends Function>(
  */
 // allow undefined, but don't make it optional as that is very likely a mistake
 export function useMemo<T>(factory: () => T, deps: DependencyList): T {
-  return createMemo(() => {
+  let cache: T;
+  // 使用立即执行的 createRenderEffect 负责更新值
+  createRenderEffect(() => {
+    cache = factory();
+  });
+  // memo 函数里面只监听 deps 变化返回新的值，避免不必要的重新计算
+  return (() => {
     trackDeps(deps);
-    return factory();
+    return cache;
   }) as T;
 }
 
@@ -122,13 +130,82 @@ export function useMemo<T>(factory: () => T, deps: DependencyList): T {
  * @see {@link https://react.dev/reference/react/useEffect}
  */
 export function useEffect(effect: EffectCallback, deps?: DependencyList): void {
-  createEffect<void | Destructor>((cleanup) => {
-    if (cleanup) {
-      cleanup();
-    }
+  let cleanup: Destructor | void;
+  createRenderEffect(() => {
     if (deps) {
       trackDeps(deps);
     }
-    return effect();
+    // 使用微任务延时调用 effect，一方面避免自动收集依赖，另一方面也是模仿了 useEffect 的实际行为
+    // useEffect 在三个 Effect 系列中是最后触发的，所以要延时3次
+    microDelay.then(() => {
+      microDelay.then(() => {
+        microDelay.then(() => {
+          if (cleanup) {
+            cleanup();
+          }
+          cleanup = effect();
+        });
+      });
+    });
+  });
+}
+
+/**
+ * The signature is identical to `useEffect`, but it fires synchronously after all DOM mutations.
+ * Use this to read layout from the DOM and synchronously re-render. Updates scheduled inside
+ * `useLayoutEffect` will be flushed synchronously, before the browser has a chance to paint.
+ *
+ * Prefer the standard `useEffect` when possible to avoid blocking visual updates.
+ *
+ * If you’re migrating code from a class component, `useLayoutEffect` fires in the same phase as
+ * `componentDidMount` and `componentDidUpdate`.
+ *
+ * @version 16.8.0
+ * @see {@link https://react.dev/reference/react/useLayoutEffect}
+ */
+export function useLayoutEffect(
+  effect: EffectCallback,
+  deps?: DependencyList
+): void {
+  let cleanup: Destructor | void;
+  createRenderEffect(() => {
+    if (deps) {
+      trackDeps(deps);
+    }
+    // 使用微任务延时调用 effect，一方面避免自动收集依赖，另一方面也是模仿了 useEffect 的实际行为
+    // useLayoutEffect 在三个 Effect 系列中第二触发，所以要延时2次
+    microDelay.then(() => {
+      microDelay.then(() => {
+        if (cleanup) {
+          cleanup();
+        }
+        cleanup = effect();
+      });
+    });
+  });
+}
+
+/**
+ * @param effect Imperative function that can return a cleanup function
+ * @param deps If present, effect will only activate if the values in the list change.
+ *
+ * @see {@link https://github.com/facebook/react/pull/21913}
+ */
+export function useInsertionEffect(
+  effect: EffectCallback,
+  deps?: DependencyList
+): void {
+  let cleanup: Destructor | void;
+  createRenderEffect(() => {
+    if (deps) {
+      trackDeps(deps);
+    }
+    // 使用微任务延时调用 effect，一方面避免自动收集依赖，另一方面也是模仿了 useEffect 的实际行为
+    microDelay.then(() => {
+      if (cleanup) {
+        cleanup();
+      }
+      cleanup = effect();
+    });
   });
 }

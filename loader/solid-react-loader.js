@@ -6,8 +6,13 @@ const traverse = require("traverse");
 module.exports = transformSouce;
 
 const createElementNameGroups = [];
-function hasImported(name) {
+function hasImportedCreateElement(name) {
   return createElementNameGroups.some((group) => group.includes(name));
+}
+
+const useEffectNameGroups = [];
+function hasImportedUseEffect(name) {
+  return useEffectNameGroups.some((group) => group.includes(name));
 }
 
 const regAnonymousFunction = /(?<=function\s*)\(/;
@@ -28,6 +33,8 @@ function transformSouce(source) {
   let defaultReactName = "React";
   const createElementNames = [];
   createElementNameGroups.push(createElementNames);
+  const useEffectNames = [];
+  useEffectNameGroups.push(useEffectNames);
   source = handleBeforeAST(source);
   // 如果是函数，外面需要包一层括号，否则报错
   const ast = JSXParser.parse(source, {
@@ -53,6 +60,12 @@ function transformSouce(source) {
                   defaultReactName = specifier.local.name;
                 } else if (specifier.imported.name === "createElement") {
                   createElementNames.push(specifier.local.name);
+                } else if (
+                  specifier.imported.name === "useEffect" ||
+                  specifier.imported.name === "useLayoutEffect" ||
+                  specifier.imported.name === "useInsertionEffect"
+                ) {
+                  useEffectNames.push(specifier.local.name);
                 }
               }
             });
@@ -64,11 +77,67 @@ function transformSouce(source) {
               handleValue(source, node.callee.object) === defaultReactName &&
               handleValue(source, node.callee.property) === "createElement") ||
             (node.callee.type === "Identifier" &&
-              hasImported(handleValue(source, node.callee)))
+              hasImportedCreateElement(handleValue(source, node.callee)))
           ) {
             results.push(source.slice(lastIndex, node.start));
             results.push(handleCreateElement(source, node));
             lastIndex = node.end;
+          } else if (
+            (node.callee.type === "MemberExpression" &&
+              handleValue(source, node.callee.object) === defaultReactName &&
+              handleValue(source, node.callee.property) === "useEffect") ||
+            (node.callee.type === "Identifier" &&
+              hasImportedUseEffect(handleValue(source, node.callee)))
+          ) {
+            // 收集变量使用
+            const identifierMap = {};
+            const useEffectBlock = node.arguments[0].body;
+            traverse(useEffectBlock).forEach(function (child) {
+              if (!!child && typeof child === "object") {
+                if (child.type === "Identifier") {
+                  if (
+                    this.parent.node.type !== "MemberExpression" ||
+                    child === this.parent.node.object
+                  ) {
+                    let children = identifierMap[child.name];
+                    if (!children) {
+                      identifierMap[child.name] = children = [];
+                    }
+                    children.push(child);
+                  }
+                }
+              }
+            });
+            const useEffectBlockSource = source.slice(
+              useEffectBlock.start,
+              useEffectBlock.end
+            );
+            const identifiers = [];
+            Object.keys(identifierMap).forEach((name) => {
+              results.push(source.slice(lastIndex, useEffectBlock.start + 1));
+              // 找到一个新名字
+              let newName = name + "_";
+              while (useEffectBlockSource.includes(newName)) {
+                newName += "_";
+              }
+              identifierMap[name].forEach((identifier) => {
+                identifier.newName = newName;
+                identifiers.push(identifier);
+              });
+              results.push(
+                `\nconst ${newName} = typeof ${name} === "function" && Symbol.solidPatchSignal in ${name} ? ${name}() : ${name};`
+              );
+              lastIndex = useEffectBlock.start + 1;
+            });
+            identifiers
+              .sort((a, b) => {
+                return a.start - b.start;
+              })
+              .forEach((identifier) => {
+                results.push(source.slice(lastIndex, identifier.start));
+                results.push(identifier.newName);
+                lastIndex = identifier.end;
+              });
           }
           break;
         case "JSXExpressionContainer":
@@ -99,6 +168,7 @@ function transformSouce(source) {
     createElementNameGroups.indexOf(createElementNames),
     1
   );
+  useEffectNameGroups.splice(useEffectNameGroups.indexOf(useEffectNames), 1);
   return source;
 }
 
