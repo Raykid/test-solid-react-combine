@@ -20,26 +20,34 @@ export const ReactPage: FC = () => {
     setCount((count) => count + 1);
   }, []);
 
+  const [autoPlusCount, setAutoPlusCount] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setAutoPlusCount((count) => count + 1);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     console.log("useEffect called: " + count);
     return () => {
       console.log("useEffect cleanup: " + count);
     };
-  }, [count]);
+  }, [count, autoPlusCount]);
 
   useLayoutEffect(() => {
     console.log("useLayoutEffect called: " + count);
     return () => {
       console.log("useLayoutEffect cleanup: " + count);
     };
-  }, [count]);
+  }, [count, count, autoPlusCount]);
 
   useInsertionEffect(() => {
     console.log("useInsertionEffect called: " + count);
     return () => {
       console.log("useInsertionEffect cleanup: " + count);
     };
-  }, [count]);
+  }, [count, doubleCount, autoPlusCount]);
 
   return (
     <div class="react-page">

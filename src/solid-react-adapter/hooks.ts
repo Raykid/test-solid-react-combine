@@ -74,12 +74,17 @@ export function useState<S>(state?: S | (() => S)) {
 }
 
 function trackDeps(deps: DependencyList) {
+  // 去重
+  const depMap: Map<unknown, boolean> = new Map();
   deps.forEach((dep) => {
-    // Track dependencies
     if (typeof dep === "function" && solidPatchSignal in (dep as any)) {
-      dep();
+      if (!depMap.has(dep)) {
+        depMap.set(dep, true);
+        dep();
+      }
     }
   });
+  depMap.clear();
 }
 
 /**
@@ -96,7 +101,6 @@ export function useCallback<T extends Function>(
   callback: T,
   deps: DependencyList
 ): T {
-  trackDeps(deps);
   return callback;
 }
 
@@ -114,10 +118,17 @@ export function useMemo<T>(factory: () => T, deps: DependencyList): T {
     cache = factory();
   });
   // memo 函数里面只监听 deps 变化返回新的值，避免不必要的重新计算
-  return (() => {
+  const memo = (() => {
     trackDeps(deps);
     return cache;
   }) as T;
+  Object.defineProperty(memo, solidPatchSignal, {
+    configurable: true,
+    enumerable: false,
+    writable: false,
+    value: solidPatchSignal,
+  });
+  return memo;
 }
 
 /**

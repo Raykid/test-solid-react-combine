@@ -96,8 +96,9 @@ function transformSouce(source) {
               if (!!child && typeof child === "object") {
                 if (child.type === "Identifier") {
                   if (
-                    this.parent.node.type !== "MemberExpression" ||
-                    child === this.parent.node.object
+                    this.parent.node.type !== "VariableDeclarator" &&
+                    (this.parent.node.type !== "MemberExpression" ||
+                      child === this.parent.node.object)
                   ) {
                     let children = identifierMap[child.name];
                     if (!children) {
@@ -125,7 +126,7 @@ function transformSouce(source) {
                 identifiers.push(identifier);
               });
               results.push(
-                `\nconst ${newName} = typeof ${name} === "function" && Symbol.solidPatchSignal in ${name} ? ${name}() : ${name};`
+                `\nvar ${newName} = typeof ${name} === "function" && Symbol.solidPatchSignal in ${name} ? ${name}() : ${name};`
               );
               lastIndex = useEffectBlock.start + 1;
             });
