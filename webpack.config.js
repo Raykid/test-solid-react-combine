@@ -57,6 +57,7 @@ module.exports = {
     extensions: [".ts", ".js", ".tsx", ".jsx"],
     alias: {
       "@": SRC_PATH,
+      react: path.join(SRC_PATH, "solid-react-adapter"),
     },
   },
 

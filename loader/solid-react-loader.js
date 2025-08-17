@@ -1,7 +1,7 @@
 const acorn = require("acorn");
-const traverse = require("traverse");
 const jsx = require("acorn-jsx");
 const JSXParser = acorn.Parser.extend(jsx());
+const traverse = require("traverse");
 
 module.exports = transformSouce;
 
@@ -10,9 +10,26 @@ function hasImported(name) {
   return createElementNameGroups.some((group) => group.includes(name));
 }
 
+const regAnonymousFunction = /(?<=function\s*)\(/;
+function handleBeforeAST(source) {
+  const resAnonymousFunction = regAnonymousFunction.exec(source);
+  if (resAnonymousFunction) {
+    let anonymousFunctionName = "___";
+    while (source.includes(anonymousFunctionName)) {
+      anonymousFunctionName += "_";
+    }
+    // 将匿名函数替换为具名函数，否则会编译报错
+    source = `${source.slice(0, resAnonymousFunction.index)} ${anonymousFunctionName}${source.slice(resAnonymousFunction.index)}`;
+  }
+  return source;
+}
+
 function transformSouce(source) {
+  let defaultReactName = "React";
   const createElementNames = [];
   createElementNameGroups.push(createElementNames);
+  source = handleBeforeAST(source);
+  // 如果是函数，外面需要包一层括号，否则报错
   const ast = JSXParser.parse(source, {
     ecmaVersion: "latest",
     sourceType: "module",
@@ -23,24 +40,48 @@ function transformSouce(source) {
   for (const node of nodes) {
     if (!!node && typeof node === "object" && node.start >= lastIndex) {
       switch (node.type) {
-        case "ImportSpecifier":
-          // 先查找 React.createElement 引用
-          if (node.imported.name === "createElement") {
-            createElementNames.push(node.local.name);
+        case "ImportDeclaration":
+          if (node.source.value === "react") {
+            node.specifiers.forEach((specifier) => {
+              if (
+                specifier.type === "ImportDefaultSpecifier" ||
+                specifier.type === "ImportNamespaceSpecifier"
+              ) {
+                defaultReactName = specifier.local.name;
+              } else if (specifier.type === "ImportSpecifier") {
+                if (specifier.imported.name === "default") {
+                  defaultReactName = specifier.local.name;
+                } else if (specifier.imported.name === "createElement") {
+                  createElementNames.push(specifier.local.name);
+                }
+              }
+            });
           }
           break;
         case "CallExpression":
           if (
             (node.callee.type === "MemberExpression" &&
-              handleValue(source, node.callee.object) === "React" &&
+              handleValue(source, node.callee.object) === defaultReactName &&
               handleValue(source, node.callee.property) === "createElement") ||
             (node.callee.type === "Identifier" &&
               hasImported(handleValue(source, node.callee)))
           ) {
-            if (lastIndex < node.start) {
-              results.push(source.slice(lastIndex, node.start));
-            }
+            results.push(source.slice(lastIndex, node.start));
             results.push(handleCreateElement(source, node));
+            lastIndex = node.end;
+          }
+          break;
+        case "JSXExpressionContainer":
+          if (
+            node.expression.type !== "Identifier" &&
+            node.expression.type !== "FunctionExpression" &&
+            node.expression.type !== "CallExpression"
+          ) {
+            // 这里给所有 JSX 表达式容器套一层立即执行的函数，增强表达式的响应能力
+            results.push(source.slice(lastIndex, node.start));
+            results.push(
+              `{(function(){return ${transformSouce(source.slice(node.start + 1, node.end - 1))}})()}`
+            );
             lastIndex = node.end;
           }
           break;
@@ -75,10 +116,12 @@ function handleValue(source, value) {
     case "MemberExpression": {
       const obj = handleValue(source, value.object);
       const prop = handleValue(source, value.property);
-      if (value.property.type === "Identifier") {
-        result = `${obj}[${prop}]`;
+      if (value.property.type === "Literal") {
+        result = `${obj}[${value.property.raw}]`;
+      } else if (value.property.type === "Identifier") {
+        result = `${obj}["${prop}"]`;
       } else {
-        result = `${obj}.${prop}`;
+        result = `${obj}[${prop}]`;
       }
       break;
     }
@@ -113,8 +156,11 @@ function handleProps(source, props) {
       if (key === "className") {
         key = "class";
       }
-      const value = handleValue(source, props.value);
-      result = `${key}=${props.value.type === "Literal" && typeof value === "string" ? `"${value}"` : `{${value}}`}`;
+      let value = handleValue(source, props.value);
+      if (props.value.type === "CallExpression") {
+        value = transformSouce(value);
+      }
+      result = `${key}=${props.value.type === "Literal" && typeof value === "string" ? `${props.value.raw}` : `{${value}}`}`;
       break;
     }
     default: {
