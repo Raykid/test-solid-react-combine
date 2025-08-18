@@ -6,12 +6,12 @@ import {
 } from "solid-js";
 
 export const microDelay = Promise.resolve();
-export const solidPatchSignal = Symbol("solid patch signal");
-Object.defineProperty(Symbol, "solidPatchSignal", {
+export const solidPatchDeps = Symbol("solid patch deps");
+Object.defineProperty(Symbol, "solidPatchDeps", {
   configurable: true,
   enumerable: false,
   writable: false,
-  value: solidPatchSignal,
+  value: solidPatchDeps,
 });
 
 export function createSignal<T>(): Signal<T | undefined>;
@@ -30,11 +30,11 @@ export function createSignal<T>(value?: T, options?: SignalOptions<T>) {
     const value = signal();
     return dirty ? cache : value;
   };
-  Object.defineProperty(wrappedSignal, solidPatchSignal, {
+  Object.defineProperty(wrappedSignal, solidPatchDeps, {
     configurable: true,
     enumerable: false,
     writable: false,
-    value: solidPatchSignal,
+    value: [],
   });
 
   return [

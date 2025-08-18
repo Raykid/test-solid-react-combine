@@ -131,7 +131,7 @@ function transformSouce(source) {
                 identifiers.push(identifier);
               });
               results.push(
-                `\nvar ${newName} = typeof ${name} === "function" && Symbol.solidPatchSignal in ${name} ? ${name}() : ${name};`
+                `\nvar ${newName} = typeof ${name} === "function" && Symbol.solidPatchDeps in ${name} ? ${name}(Symbol.symbolValidate) : ${name};`
               );
               lastIndex = useEffectBlock.start + 1;
             });

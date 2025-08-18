@@ -1,5 +1,13 @@
-import { createEffect, createRenderEffect } from "solid-js";
-import { createSignal, microDelay, solidPatchSignal } from "./patch";
+import {
+  createContext as _createContext,
+  useContext as _useContext,
+  Context,
+  createEffect,
+  createRenderEffect,
+  FlowComponent,
+  JSX,
+} from "solid-js";
+import { createSignal, microDelay, solidPatchDeps } from "./patch";
 
 /**
  * The instruction passed to a {@link Dispatch} function in {@link useState}
@@ -42,6 +50,14 @@ export type Destructor = () => void;
 // NOTE: callbacks are _only_ allowed to return either void, or a destructor.
 export type EffectCallback = () => void | Destructor;
 
+const symbolValidate = Symbol("validate");
+Object.defineProperty(Symbol, "symbolValidate", {
+  configurable: true,
+  enumerable: false,
+  writable: false,
+  value: symbolValidate,
+});
+
 export function useState<S>(
   initialState: S | (() => S)
 ): [S, Dispatch<SetStateAction<S>>];
@@ -62,8 +78,10 @@ export function useState<S>(state?: S | (() => S)) {
           case Symbol.toPrimitive:
           case "toJSON":
             return signal;
-          case solidPatchSignal:
-            return solidPatchSignal;
+          case solidPatchDeps:
+            return (signal as any as { [solidPatchDeps]: DependencyList })[
+              solidPatchDeps
+            ];
           default:
             return Reflect.get(value!, key);
         }
@@ -74,17 +92,21 @@ export function useState<S>(state?: S | (() => S)) {
 }
 
 function trackDeps(deps: DependencyList) {
-  // 去重
-  const depMap: Map<unknown, boolean> = new Map();
-  deps.forEach((dep) => {
-    if (typeof dep === "function" && solidPatchSignal in (dep as any)) {
-      if (!depMap.has(dep)) {
-        depMap.set(dep, true);
-        dep();
+  if (deps.length > 0) {
+    // 去重
+    const depMap: Map<unknown, boolean> = new Map();
+    deps.forEach((dep) => {
+      if (typeof dep === "function" && solidPatchDeps in (dep as any)) {
+        if (!depMap.has(dep)) {
+          depMap.set(dep, true);
+          dep(symbolValidate);
+          // 还要间接追踪依赖
+          trackDeps((dep as any)[solidPatchDeps]);
+        }
       }
-    }
-  });
-  depMap.clear();
+    });
+    depMap.clear();
+  }
 }
 
 /**
@@ -101,7 +123,41 @@ export function useCallback<T extends Function>(
   callback: T,
   deps: DependencyList
 ): T {
-  return callback;
+  function factory() {
+    return function (this: any, ...args: any[]) {
+      return callback.apply(this, args);
+    } as any as T;
+  }
+  let cache: T;
+  // 使用立即执行的 createRenderEffect 负责更新值
+  createRenderEffect(() => {
+    trackDeps(deps);
+    cache = factory();
+  });
+  // memo 函数里面只监听 deps 变化返回新的值，避免不必要的重新计算
+  return new Proxy(cache!, {
+    get(_, key) {
+      switch (key) {
+        case solidPatchDeps:
+          return deps;
+        default:
+          return Reflect.get(cache, key);
+      }
+    },
+    apply(_, thisArg, args) {
+      return args.length === 1 && args[0] === symbolValidate
+        ? cache
+        : cache.apply(thisArg, args);
+    },
+    has(_, key) {
+      switch (key) {
+        case solidPatchDeps:
+          return true;
+        default:
+          return key in cache;
+      }
+    },
+  });
 }
 
 /**
@@ -122,11 +178,11 @@ export function useMemo<T>(factory: () => T, deps: DependencyList): T {
     trackDeps(deps);
     return cache;
   }) as T;
-  Object.defineProperty(memo, solidPatchSignal, {
+  Object.defineProperty(memo, solidPatchDeps, {
     configurable: true,
     enumerable: false,
     writable: false,
-    value: solidPatchSignal,
+    value: deps,
   });
   return memo;
 }
@@ -219,4 +275,187 @@ export function useInsertionEffect(
       cleanup = effect();
     });
   });
+}
+
+/**
+ * Created by {@link createRef}, or {@link useRef} when passed `null`.
+ *
+ * @template T The type of the ref's value.
+ *
+ * @example
+ *
+ * ```tsx
+ * const ref = createRef<HTMLDivElement>();
+ *
+ * ref.current = document.createElement('div'); // Error
+ * ```
+ */
+export type RefObject<T> = {
+  (el: T): void;
+  /**
+   * The current value of the ref.
+   */
+  current: T;
+};
+
+/**
+ * `useRef` returns a mutable ref object whose `.current` property is initialized to the passed argument
+ * (`initialValue`). The returned object will persist for the full lifetime of the component.
+ *
+ * Note that `useRef()` is useful for more than the `ref` attribute. It’s handy for keeping any mutable
+ * value around similar to how you’d use instance fields in classes.
+ *
+ * @version 16.8.0
+ * @see {@link https://react.dev/reference/react/useRef}
+ */
+export function useRef<T>(initialValue: T): RefObject<T>;
+// convenience overload for refs given as a ref prop as they typically start with a null value
+/**
+ * `useRef` returns a mutable ref object whose `.current` property is initialized to the passed argument
+ * (`initialValue`). The returned object will persist for the full lifetime of the component.
+ *
+ * Note that `useRef()` is useful for more than the `ref` attribute. It’s handy for keeping any mutable
+ * value around similar to how you’d use instance fields in classes.
+ *
+ * @version 16.8.0
+ * @see {@link https://react.dev/reference/react/useRef}
+ */
+export function useRef<T>(initialValue: T | null): RefObject<T | undefined>;
+// convenience overload for undefined initialValue
+/**
+ * `useRef` returns a mutable ref object whose `.current` property is initialized to the passed argument
+ * (`initialValue`). The returned object will persist for the full lifetime of the component.
+ *
+ * Note that `useRef()` is useful for more than the `ref` attribute. It’s handy for keeping any mutable
+ * value around similar to how you’d use instance fields in classes.
+ *
+ * @version 16.8.0
+ * @see {@link https://react.dev/reference/react/useRef}
+ */
+export function useRef<T>(
+  initialValue: T | undefined
+): RefObject<T | undefined>;
+export function useRef<T, Init = T | null | undefined>(
+  initialValue: Init
+): RefObject<Exclude<Init, null>> {
+  // 返回一个函数，只用 ref 的函数模式
+  const ref = ((v: Exclude<Init, null>) => {
+    ref.current = v;
+  }) as RefObject<Exclude<Init, null>>;
+  ref.current = (initialValue === null ? undefined : initialValue) as Exclude<
+    Init,
+    null
+  >;
+  return ref;
+}
+
+/**
+ * Lets you create a {@link Context} that components can provide or read.
+ *
+ * @param defaultValue The value you want the context to have when there is no matching
+ * {@link Provider} in the tree above the component reading the context. This is meant
+ * as a "last resort" fallback.
+ *
+ * @see {@link https://react.dev/reference/react/createContext#reference React Docs}
+ * @see {@link https://react-typescript-cheatsheet.netlify.app/docs/basic/getting-started/context/ React TypeScript Cheatsheet}
+ *
+ * @example
+ *
+ * ```tsx
+ * import { createContext } from 'react';
+ *
+ * const ThemeContext = createContext('light');
+ * function App() {
+ *   return (
+ *     <ThemeContext value="dark">
+ *       <Toolbar />
+ *     </ThemeContext>
+ *   );
+ * }
+ * ```
+ */
+export function createContext<T>(
+  // If you thought this should be optional, see
+  // https://github.com/DefinitelyTyped/DefinitelyTyped/pull/24509#issuecomment-382213106
+  defaultValue: T
+): Context<T> & {
+  Consumer: FlowComponent<{}, (value: T) => JSX.Element>;
+  displayName?: string | undefined;
+} {
+  const context = _createContext(defaultValue);
+  return {
+    ...context,
+    Consumer: (props) => {
+      const value = useContext(context);
+      return props.children(value);
+    },
+    displayName: undefined as string | undefined,
+  };
+}
+
+/**
+ * Accepts a context object (the value returned from `React.createContext`) and returns the current
+ * context value, as given by the nearest context provider for the given context.
+ *
+ * @version 16.8.0
+ * @see {@link https://react.dev/reference/react/useContext}
+ */
+export function useContext<T>(context: Context<T>): T {
+  return _useContext(context);
+}
+
+// Limit the reducer to accept only 0 or 1 action arguments
+// eslint-disable-next-line @definitelytyped/no-single-element-tuple-type
+export type AnyActionArg = [] | [any];
+
+// Get the dispatch type from the reducer arguments (captures optional action argument correctly)
+export type ActionDispatch<ActionArg extends AnyActionArg> = (
+  ...args: ActionArg
+) => void;
+
+/**
+ * An alternative to `useState`.
+ *
+ * `useReducer` is usually preferable to `useState` when you have complex state logic that involves
+ * multiple sub-values. It also lets you optimize performance for components that trigger deep
+ * updates because you can pass `dispatch` down instead of callbacks.
+ *
+ * @version 16.8.0
+ * @see {@link https://react.dev/reference/react/useReducer}
+ */
+export function useReducer<S, A extends AnyActionArg>(
+  reducer: (prevState: S, ...args: A) => S,
+  initialState: S
+): [S, ActionDispatch<A>];
+/**
+ * An alternative to `useState`.
+ *
+ * `useReducer` is usually preferable to `useState` when you have complex state logic that involves
+ * multiple sub-values. It also lets you optimize performance for components that trigger deep
+ * updates because you can pass `dispatch` down instead of callbacks.
+ *
+ * @version 16.8.0
+ * @see {@link https://react.dev/reference/react/useReducer}
+ */
+export function useReducer<S, I, A extends AnyActionArg>(
+  reducer: (prevState: S, ...args: A) => S,
+  initialArg: I,
+  init: (i: I) => S
+): [S, ActionDispatch<A>];
+export function useReducer<S, I, A extends AnyActionArg>(
+  reducer: (prevState: S, ...args: A) => S,
+  initialState: I | S,
+  init?: (i: I) => S
+): [S, ActionDispatch<A>] {
+  if (init) {
+    initialState = init(initialState as I);
+  }
+  const [state, setState] = useState(initialState as S);
+  return [
+    state,
+    (...args: A) => {
+      const newState = reducer(state, ...args);
+      setState(newState as Exclude<S, Function>);
+    },
+  ];
 }
