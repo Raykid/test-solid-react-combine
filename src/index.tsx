@@ -57,7 +57,7 @@ render(() => {
         }
         <br />
         <SolidPage />
-        <ReactPage />
+        {count < 5 && <ReactPage />}
       </div>
     </SomeContext.Provider>
   );

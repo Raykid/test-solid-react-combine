@@ -6,6 +6,7 @@ import {
   createRenderEffect,
   FlowComponent,
   JSX,
+  onCleanup,
 } from "solid-js";
 import { createSignal, microDelay, solidPatchDeps } from "./patch";
 
@@ -214,6 +215,19 @@ export function useEffect(effect: EffectCallback, deps?: DependencyList): void {
         });
       });
     });
+    // 销毁时调用
+    onCleanup(() => {
+      microDelay.then(() => {
+        microDelay.then(() => {
+          microDelay.then(() => {
+            if (cleanup) {
+              cleanup();
+              cleanup = undefined;
+            }
+          });
+        });
+      });
+    });
   });
 }
 
@@ -249,6 +263,17 @@ export function useLayoutEffect(
         cleanup = effect();
       });
     });
+    // 销毁时调用
+    onCleanup(() => {
+      microDelay.then(() => {
+        microDelay.then(() => {
+          if (cleanup) {
+            cleanup();
+            cleanup = undefined;
+          }
+        });
+      });
+    });
   });
 }
 
@@ -273,6 +298,15 @@ export function useInsertionEffect(
         cleanup();
       }
       cleanup = effect();
+    });
+    // 销毁时调用
+    onCleanup(() => {
+      microDelay.then(() => {
+        if (cleanup) {
+          cleanup();
+          cleanup = undefined;
+        }
+      });
     });
   });
 }
