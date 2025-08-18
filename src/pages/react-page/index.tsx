@@ -1,3 +1,4 @@
+import { CiOutlined } from "@ant-design/icons";
 import {
   FC,
   useCallback,
@@ -103,6 +104,7 @@ export const ReactPage: FC = () => {
       >
         useReducer {state.count}
       </div>
+      <CiOutlined />
     </div>
   );
 };
