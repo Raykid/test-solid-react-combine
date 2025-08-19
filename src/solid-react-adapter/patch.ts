@@ -85,7 +85,12 @@ export function wrapSolidComp(tag: any) {
             handleChild(children);
           }
         } else {
-          element.setAttribute(key, props[key]);
+          if (key !== "key") {
+            const value = props[key];
+            if (value) {
+              element.setAttribute(key, value);
+            }
+          }
         }
       });
       return element;
