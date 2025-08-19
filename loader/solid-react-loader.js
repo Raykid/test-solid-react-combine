@@ -3,7 +3,7 @@ const jsx = require("acorn-jsx");
 const JSXParser = acorn.Parser.extend(jsx());
 const traverse = require("traverse");
 
-module.exports = transformSouce;
+module.exports = transformSource;
 
 const createElementNameGroups = [];
 function hasImportedCreateElement(name) {
@@ -29,7 +29,7 @@ function handleBeforeAST(source) {
   return source;
 }
 
-function transformSouce(source) {
+function transformSource(source) {
   let defaultReactName = "React";
   const createElementNames = [];
   createElementNameGroups.push(createElementNames);
@@ -41,10 +41,9 @@ function transformSouce(source) {
     ecmaVersion: "latest",
     sourceType: "module",
   });
-  const nodes = traverse(ast.body).nodes();
   const results = [];
   let lastIndex = 0;
-  for (const node of nodes) {
+  traverse(ast.body).forEach(function (node) {
     if (!!node && typeof node === "object" && node.start >= lastIndex) {
       switch (node.type) {
         case "ImportDeclaration":
@@ -100,15 +99,23 @@ function transformSouce(source) {
                     this.parent.node.type !== "MemberExpression" ||
                     child === this.parent.node.object
                   ) {
-                    if (this.parent.node.type === "VariableDeclarator") {
-                      whiteList.push(child.name);
-                      delete identifierMap[child.name];
-                    } else if (!whiteList.includes(child.name)) {
-                      let children = identifierMap[child.name];
-                      if (!children) {
-                        identifierMap[child.name] = children = [];
-                      }
-                      children.push(child);
+                    switch (this.parent.node.type) {
+                      case "VariableDeclarator":
+                      case "Property":
+                        if (!whiteList.includes(child.name)) {
+                          whiteList.push(child.name);
+                          delete identifierMap[child.name];
+                        }
+                        break;
+                      default:
+                        if (!whiteList.includes(child.name)) {
+                          let children = identifierMap[child.name];
+                          if (!children) {
+                            identifierMap[child.name] = children = [];
+                          }
+                          children.push(child);
+                        }
+                        break;
                     }
                   }
                 }
@@ -154,9 +161,59 @@ function transformSouce(source) {
           ) {
             // 这里给所有 JSX 表达式容器套一层立即执行的函数，增强表达式的响应能力
             results.push(source.slice(lastIndex, node.start));
-            results.push(
-              `{(function(){return ${transformSouce(source.slice(node.start + 1, node.end - 1))}})()}`
-            );
+            if (node.expression.type === "ObjectExpression") {
+              results.push(
+                `{{${node.expression.properties
+                  .map((property) => {
+                    return `${property.key.raw ?? handleValue(source, property.key)}: ${transformSource(property.value.raw)}`;
+                  })
+                  .join(",")}}}`
+              );
+            } else {
+              results.push(
+                `{(function(){return ${transformSource(source.slice(node.start + 1, node.end - 1))}})()}`
+              );
+            }
+            lastIndex = node.end;
+          }
+          break;
+        case "JSXElement":
+          const tagName = node.openingElement.name.name;
+          if (!/^[a-z]/.test(tagName)) {
+            // 非小写字母开头的 jsx tag，为了避免字符串变量的使用，包一层函数
+            let newName = tagName + "_";
+            const nodeStr = source.slice(node.start, node.end);
+            while (
+              newName === "__wrapSolidComp__" ||
+              nodeStr.includes(newName)
+            ) {
+              newName += "_";
+            }
+            results.push(source.slice(lastIndex, node.start));
+            const openingElementStr = `<${newName}${source.slice(
+              node.openingElement.start + tagName.length + 1,
+              node.openingElement.end
+            )}`;
+            const childrenStr = node.children.reduce((str, child) => {
+              let childStr = transformSource(
+                source.slice(child.start, child.end)
+              );
+              if (child.type === "JSXElement") {
+                childStr = `{${childStr}}`;
+              }
+              return str + childStr;
+            }, "");
+            const closingElementStr = node.closingElement
+              ? `</${newName}>`
+              : "";
+            let result = `(()=>{var ${newName} = __wrapSolidComp__(${tagName});return ${openingElementStr}${childrenStr}${closingElementStr}})()`;
+            if (
+              this.parent.key === "children" &&
+              this.parent.parent.node.type === "JSXElement"
+            ) {
+              result = `{${result}}`;
+            }
+            results.push(result);
             lastIndex = node.end;
           }
           break;
@@ -164,7 +221,7 @@ function transformSouce(source) {
           break;
       }
     }
-  }
+  });
   if (lastIndex < source.length) {
     results.push(source.slice(lastIndex));
   }
@@ -234,12 +291,17 @@ function handleProps(source, props) {
       }
       let value = handleValue(source, props.value);
       if (props.value.type === "CallExpression") {
-        value = transformSouce(value);
+        value = transformSource(value);
       }
       result = `${key}=${props.value.type === "Literal" && typeof value === "string" ? `${props.value.raw}` : `{${value}}`}`;
       break;
     }
+    case "SpreadElement": {
+      result = `{${source.slice(props.start, props.end)}}`;
+      break;
+    }
     default: {
+      result = `{...(${source.slice(props.start, props.end)})}`;
       break;
     }
   }
@@ -255,9 +317,9 @@ function handleCreateElement(source, node) {
         case "Identifier":
           return `{${child.name}}`;
         case "JSXElement":
-          return transformSouce(source.slice(child.start, child.end));
+          return transformSource(source.slice(child.start, child.end));
         default:
-          return `{${transformSouce(source.slice(child.start, child.end))}}`;
+          return `{${transformSource(source.slice(child.start, child.end))}}`;
       }
     })
     .join("");
@@ -275,7 +337,7 @@ function handleCreateElement(source, node) {
       ) {
         tag += "_";
       }
-      return `(function(){var ${tag}=${identifierStr};return ${
+      return `(function(){var ${tag}=__wrapSolidComp__(${identifierStr});return ${
         childrenStr
           ? `<${tag} ${propsStr}>${childrenStr}</${tag}>`
           : `<${tag} ${propsStr}/>`

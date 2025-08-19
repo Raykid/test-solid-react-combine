@@ -1,3 +1,4 @@
+import { ComponentType } from "react";
 import {
   createSignal as _createSignal,
   Setter,
@@ -52,4 +53,59 @@ export function createSignal<T>(value?: T, options?: SignalOptions<T>) {
       return cache;
     }) as Setter<T>,
   ];
+}
+
+export function wrapSolidComp(tag: any) {
+  if (typeof tag === "function") {
+    return tag;
+  } else {
+    return (props: any) => {
+      const element = document.createElement(tag + "");
+      const handleChild = (child: any) => {
+        switch (typeof child) {
+          case "function":
+            child = child();
+            break;
+          case "string":
+            child = document.createTextNode(child + "");
+            break;
+          default:
+            break;
+        }
+        if (child instanceof Node) {
+          element.appendChild(child);
+        }
+      };
+      Object.keys(props).forEach((key) => {
+        if (key === "children") {
+          const children = props.children;
+          if (Array.isArray(children)) {
+            children.forEach(handleChild);
+          } else {
+            handleChild(children);
+          }
+        } else {
+          element.setAttribute(key, props[key]);
+        }
+      });
+      return element;
+    };
+  }
+}
+
+declare global {
+  function __wrapSolidComp__(tag: any): ComponentType<any>;
+
+  interface Window {
+    __wrapSolidComp__(tag: any): ComponentType<any>;
+  }
+}
+
+export function enablePatch() {
+  Object.defineProperty(window, "__wrapSolidComp__", {
+    configurable: true,
+    enumerable: false,
+    writable: false,
+    value: wrapSolidComp,
+  });
 }
